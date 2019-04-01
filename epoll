@@ -75,16 +75,16 @@ struct eventpoll {
     struct mutex mtx;
     /* Wait queue used by sys_epoll_wait() */
     /* 调用epoll_wait()时, 我们就是"睡"在了这个等待队列上... */
-    wait_queue_head_t wq;
+    wait_queue_head_t wq; //sys_epoll_wait（）使用的等待队列
     /* Wait queue used by file->poll() */
     /* 这个用于epollfd本事被poll的时候... */
-    wait_queue_head_t poll_wait;
+    wait_queue_head_t poll_wait; // file->poll()使用的等待队列
     /* List of ready file descriptors */
     /* 所有已经ready的epitem都在这个链表里面 */
-    struct list_head rdllist;
+    struct list_head rdllist; //所用准备就绪的文件描述符列表
     /* RB tree root used to store monitored fd structs */
     /* 所有要监听的epitem都在这里 */
-    struct rb_root rbr;
+    struct rb_root rbr; //用于存储已监控fd的红黑树节点
     /*
         这是一个单链表链接着所有的struct epitem当event转移到用户空间时
      */
@@ -92,10 +92,10 @@ struct eventpoll {
      * happened while transfering ready events to userspace w/out
      * holding ->lock.
      */
-    struct epitem *ovflist;
+    struct epitem *ovflist; //当正向用户空间传递事件，则就绪事件会临时放到该队列，否则直接放到rdlist
     /* The user that created the eventpoll descriptor */
     /* 这里保存了一些用户变量, 比如fd监听数量的最大值等等 */
-    struct user_struct *user;
+    struct user_struct *user; //创建eventpoll描述符的用户
 };
 /*
  * Each file descriptor added to the eventpoll interface will
@@ -109,31 +109,31 @@ struct epitem {
      * 保存在epollfd, 也就是struct eventpoll中.
      * 在这里使用rb_tree的原因我认为是提高查找,插入以及删除的速度.
      * rb_tree对以上3个操作都具有O(lgN)的时间复杂度 */
-    struct rb_node rbn;
+    struct rb_node rbn; //RB树节点将此结构链接到eventpoll RB树
     /* List header used to link this structure to the eventpoll ready list */
     /* 链表节点, 所有已经ready的epitem都会被链到eventpoll的rdllist中 */
-    struct list_head rdllink;
+    struct list_head rdllink; //用于将此结构链接到eventpoll就绪列表的列表中
     /*
      * Works together "struct eventpoll"->ovflist in keeping the
      * single linked chain of items.
      */
     /* 这个在代码中再解释... */
-    struct epitem *next;
+    struct epitem *next; //配合ovflist一起使用用来保持单向恋的数目
     /* The file descriptor information this item refers to */
     /* epitem对应的fd和struct file */
-    struct epoll_filefd ffd;
+    struct epoll_filefd ffd; //此条目引用的文件描述符信息
     /* Number of active wait queue attached to poll operations */
-    int nwait;
+    int nwait; //附加到poll轮询的活跃等待队列数
     /* List containing poll wait queues */
     struct list_head pwqlist;
     /* The "container" of this item */
     /* 当前epitem属于哪个eventpoll */
     struct eventpoll *ep;
     /* List header used to link this item to the "struct file" items list */
-    struct list_head fllink;
+    struct list_head fllink; //链接到file条目列表的列表头
     /* The structure that describe the interested events and the source fd */
     /* 当前的epitem关系哪些events, 这个数据是调用epoll_ctl时从用户态传递过来 */
-    struct epoll_event event;
+    struct epoll_event event; //监控的事件和文件描述符
 };
 struct epoll_filefd {
     struct file *file;
@@ -142,18 +142,18 @@ struct epoll_filefd {
 /* poll所用到的钩子Wait structure used by the poll hooks */
 struct eppoll_entry {
     /* List header used to link this structure to the "struct epitem" */
-    struct list_head llink;
+    struct list_head llink; //指向epitem的列表头
     /* The "base" pointer is set to the container "struct epitem" */
-    struct epitem *base;
+    struct epitem *base; //指向epitem的指针
     /*
      * Wait queue item that will be linked to the target file wait
      * queue head.
      */
-    wait_queue_t wait;
+    wait_queue_t wait; //指向target file等待队列
     /* The wait queue head that linked the "wait" wait queue item */
-    wait_queue_head_t *whead;
+    wait_queue_head_t *whead; //执行wait等待队列
 };
-/* Wrapper struct used by poll queueing */
+/* Wrapper struct used by   queueing */
 struct ep_pqueue {
     poll_table pt;
     struct epitem *epi;
