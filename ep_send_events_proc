@@ -1,0 +1,55 @@
+/* 该函数作为callbakc在ep_scan_ready_list()中被调用
+ * head是一个链表, 包含了已经ready的epitem,
+ * 这个不是eventpoll里面的ready list, 而是上面函数中的txlist.
+ */
+static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
+                   void *priv)
+{
+    struct ep_send_events_data *esed = priv;
+    int eventcnt;
+    unsigned int revents;
+    struct epitem *epi;
+    struct epoll_event __user *uevent;
+
+    /* 扫描整个链表... */
+    for (eventcnt = 0, uevent = esed->events;
+         !list_empty(head) && eventcnt < esed->maxevents;) {
+        /* 取出第一个成员 */
+        epi = list_first_entry(head, struct epitem, rdllink);
+        /* 然后从链表里面移除 */
+        list_del_init(&epi->rdllink);
+        /* 读取events, 
+         * 注意events我们ep_poll_callback()里面已经取过一次了, 为啥还要再取?
+         * 1. 我们当然希望能拿到此刻的最新数据, events是会变的~
+         * 2. 不是所有的poll实现, 都通过等待队列传递了events, 有可能某些驱动压根没传
+         * 必须主动去读取. */
+        revents = epi->ffd.file->f_op->poll(epi->ffd.file, NULL) &
+            epi->event.events;
+        if (revents) {
+            /* 将当前的事件和用户传入的数据都copy给用户空间,
+             * 就是epoll_wait()后应用程序能读到的那一堆数据. */
+            if (__put_user(revents, &uevent->events) ||
+                __put_user(epi->event.data, &uevent->data)) {
+                list_add(&epi->rdllink, head);
+                return eventcnt ? eventcnt : -EFAULT;
+            }
+            eventcnt++;
+            uevent++;
+            if (epi->event.events & EPOLLONESHOT)
+                epi->event.events &= EP_PRIVATE_BITS;
+            else if (!(epi->event.events & EPOLLET)) {
+                /* 嘿嘿, EPOLLET和非ET的区别就在这一步之差呀~
+                 * 如果是ET, epitem是不会再进入到readly list,
+                 * 除非fd再次发生了状态改变, ep_poll_callback被调用.
+                 * 如果是非ET, 不管你还有没有有效的事件或者数据,
+                 * 都会被重新插入到ready list, 再下一次epoll_wait
+                 * 时, 会立即返回, 并通知给用户空间. 当然如果这个
+                 * 被监听的fds确实没事件也没数据了, epoll_wait会返回一个0,
+                 * 空转一次.
+                 */
+                list_add_tail(&epi->rdllink, &ep->rdllist);
+            }
+        }
+    }
+    return eventcnt;
+}
