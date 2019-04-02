@@ -1,11 +1,16 @@
+// 对应于一个加入到epoll的文件
 struct epitem{
-  struct rb_node rbn;
-  struct list_head rdlink;
-  struct epitem *next;
-  struct epoll_filefd ffd;
-  int nwait;
+  struct rb_node rbn; // 挂载到eventpoll的红黑树节点
+  struct list_head rdlink; // 挂载到eventpoll.rdlist的节点
+  struct epitem *next; // 连接到ovflist的指针
+  struct epoll_filefd ffd; // 文件描述符信息fd + file，以及红黑树的key
+  int nwait; 
+  // 当前文件的等待队列(eppoll_entry)列表
+  // 同一个文件上可能会监视多种事件
+  // 这些事件可能属于不同的wait_queue中
+  // 所以需要使用列表
   struct list_head pwqlist;
-  struct eventpoll *ep;
+  struct eventpoll *ep; // 当前epitem的所有者
   struct list_head fllink;
-  struct epoll_event;
-}
+  struct epoll_event; // epoll_ctl传入的用户数据
+};
