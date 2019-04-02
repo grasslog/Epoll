@@ -1,0 +1,23 @@
+// epoll文件系统的初始化，在系统启动的时候回调用
+static int __init eventpoll_init(void)
+{
+  struct sysinfo si;
+  
+  si_meminfo(&si); // 限制可添加到epoll的最多的描述符数量
+  
+      max_user_watches = (((si.totalram - si.totalhigh) / 25) << PAGE_SHIFT) /  
+                       EP_ITEM_COST;  
+    BUG_ON(max_user_watches < 0);  
+
+    // 初始化递归检查队列  
+   ep_nested_calls_init(&poll_loop_ncalls);  
+    ep_nested_calls_init(&poll_safewake_ncalls);  
+    ep_nested_calls_init(&poll_readywalk_ncalls);  
+    // epoll 使用的slab分配器分别用来分配epitem和eppoll_entry  
+    epi_cache = kmem_cache_create("eventpoll_epi", sizeof(struct epitem),  
+                                  0, SLAB_HWCACHE_ALIGN | SLAB_PANIC, NULL);  
+    pwq_cache = kmem_cache_create("eventpoll_pwq",  
+                                  sizeof(struct eppoll_entry), 0, SLAB_PANIC, NULL);  
+
+    return 0;  
+}  
