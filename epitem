@@ -1,0 +1,11 @@
+struct epitem{
+  struct rb_node rbn;
+  struct list_head rdlink;
+  struct epitem *next;
+  struct epoll_filefd ffd;
+  int nwait;
+  struct list_head pwqlist;
+  struct eventpoll *ep;
+  struct list_head fllink;
+  struct epoll_event;
+}
