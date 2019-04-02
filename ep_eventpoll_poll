@@ -1,0 +1,15 @@
+static unsigned int ep_eventpoll_poll(struct file *file, poll_table *wait)
+{
+    int pollflags;  
+    struct eventpoll *ep = file->private_data;  
+    // 插入到wait_queue  
+    poll_wait(file, &ep->poll_wait, wait);  
+    // 扫描就绪的文件列表, 调用每个文件上的poll 检测是否真的就绪,  
+    // 然后复制到用户空间  
+    // 文件列表中有可能有epoll文件, 调用poll的时候有可能会产生递归,  
+    // 调用所以用ep_call_nested 包装一下, 防止死循环和过深的调用  
+    pollflags = ep_call_nested(&poll_readywalk_ncalls, EP_MAX_NESTS,  
+                               ep_poll_readyevents_proc, ep, ep, current);  
+    // static struct nested_calls poll_readywalk_ncalls;  
+    return pollflags != -1 ? pollflags : 0;  
+}  
