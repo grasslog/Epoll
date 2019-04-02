@@ -1,0 +1,10 @@
+// 通用的poll_wait 函数, 文件的f_ops->poll 通常会调用此函数  
+static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)  
+{  
+    if (p && p->_qproc && wait_address) {  
+        // 调用_qproc 在wait_address 上添加节点和回调函数  
+        // 调用 poll_table_struct 上的函数指针向wait_address添加节点, 并设置节点的func  
+        // (如果是select或poll 则是 __pollwait, 如果是 epoll 则是 ep_ptable_queue_proc),  
+        p->_qproc(filp, wait_address, p);  
+    }  
+}
