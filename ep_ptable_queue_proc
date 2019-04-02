@@ -1,0 +1,27 @@
+/* 
+ * 该函数在调用f_op->poll()时会被调用.
+ * 也就是epoll主动poll某个fd时, 用来将epitem与指定的fd关联起来的.
+ * 关联的办法就是使用等待队列(waitqueue)
+ */
+static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
+                 poll_table *pt)
+{
+    struct epitem *epi = ep_item_from_epqueue(pt);
+    struct eppoll_entry *pwq;
+    if (epi->nwait >= 0 && (pwq = kmem_cache_alloc(pwq_cache, GFP_KERNEL))) {
+        /* 初始化等待队列, 指定ep_poll_callback为唤醒时的回调函数,
+         * 当我们监听的fd发生状态改变时, 也就是队列头被唤醒时,
+         * 指定的回调函数将会被调用. */
+        init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
+        pwq->whead = whead;
+        pwq->base = epi;
+        /* 将刚分配的等待队列成员加入到头中, 头是由fd持有的 */
+        add_wait_queue(whead, &pwq->wait);
+        list_add_tail(&pwq->llink, &epi->pwqlist);
+        /* nwait记录了当前epitem加入到了多少个等待队列中 */
+        epi->nwait++;
+    } else {
+        /* We have to signal that an error occurred */
+        epi->nwait = -1;
+    }
+}
