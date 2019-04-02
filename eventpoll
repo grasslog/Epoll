@@ -1,0 +1,14 @@
+epoll的核心实现对应于一个epoll描述符
+struct eventpoll{
+  spinlock_t lock;
+  struct mutex mtx;
+  wait_queue_head_t wq; // sys_epoll_wait()
+  wait_queue_head_t poll_wait;
+  struct list_head rdlist;
+  struct rb_root rbr;
+  struct epitem *ovlist;
+  struct user_struct *user;
+  struct file *file;
+  int visited;
+  struct list_head visited_list_link
+}
