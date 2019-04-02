@@ -1,0 +1,17 @@
+SYSCALL_DEFINE1(epoll_create1, int, flags)
+{
+  int error;
+  struct eventpoll *ep = NULL;
+  BUILD_BUG_ON(EPOLL_CLOEXEC != O_CLOEXEC);
+  // 对于epoll来讲，目前唯一有效的FLAG就是CLOEXEC
+  if(flags & ~EPOLL_CLOEXEC)
+      return -EINVAL;
+  error = ep_alloc(&ep); // 分配一个struct eventpoll
+  if(error < 0)
+     return error;
+error = anon_inode_getfd("[eventpoll]", &eventpoll_fops, ep,
+                 O_RDWR | (flags & O_CLOEXEC));
+    if (error < 0)
+        ep_free(ep);
+    return error;
+}
