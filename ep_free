@@ -1,0 +1,28 @@
+/* ep_free在epollfd被close时调用,
+ * 释放一些资源而已, 比较简单 */
+static void ep_free(struct eventpoll *ep)
+{
+    struct rb_node *rbp;
+    struct epitem *epi;
+    /* We need to release all tasks waiting for these file */
+    if (waitqueue_active(&ep->poll_wait))
+        ep_poll_safewake(&ep->poll_wait);
+
+    mutex_lock(&epmutex);
+
+    for (rbp = rb_first(&ep->rbr); rbp; rbp = rb_next(rbp)) {
+        epi = rb_entry(rbp, struct epitem, rbn);
+        ep_unregister_pollwait(ep, epi);
+    }
+
+    /* 之所以在关闭epollfd之前不需要调用epoll_ctl移除已经添加的fd,
+     * 是因为这里已经做了... */
+    while ((rbp = rb_first(&ep->rbr)) != NULL) {
+        epi = rb_entry(rbp, struct epitem, rbn);
+        ep_remove(ep, epi);
+    }
+    mutex_unlock(&epmutex);
+    mutex_destroy(&ep->mtx);
+    free_uid(ep->user);
+    kfree(ep);
+}
