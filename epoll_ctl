@@ -1,0 +1,114 @@
+// 创建号epollfd后，接下来添加fd
+// epoll_ctl的参数：epfd表示epollfd；op有ADD，MOD，DEL
+// fd是需要监听的描述符，event是我们感兴趣的events
+SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd, struct epoll_event __user *, event)
+{
+  int error;
+  int did_lock_epmutex = 0;
+  struct file *file, *tfile;
+  struct eventpoll *ep;
+  struct epitem *epi;
+  struct epoll_event epds
+  
+  error = -EFAULT;
+//错误处理以及从用户空间将epoll_event结构copy到内核空间.
+    if (ep_op_has_event(op) &&  
+            // 复制用户空间数据到内核  
+            copy_from_user(&epds, event, sizeof(struct epoll_event))) {  
+        goto error_return;  
+    }  
+  // 取得epfd对应的文件
+  error = -EBADF;
+  file = fget(epfd);
+  if(!file) {
+  goto error_return;
+  }
+  
+  // 取得目标文件
+  tfile = fget(fd);
+  if(!tfile) {
+  goto error_fput;
+  }
+  
+    // 目标文件必须提供 poll 操作  
+    error = -EPERM;  
+    if (!tfile->f_op || !tfile->f_op->poll) {  
+        goto error_tgt_fput;  
+    }  
+
+    // 添加自身或epfd 不是epoll 句柄  
+    error = -EINVAL;  
+    if (file == tfile || !is_file_epoll(file)) {  
+        goto error_tgt_fput;  
+    }  
+
+    // 取得内部结构eventpoll  
+    ep = file->private_data;  
+
+    // EPOLL_CTL_MOD 不需要加全局锁 epmutex  
+    if (op == EPOLL_CTL_ADD || op == EPOLL_CTL_DEL) {  
+        mutex_lock(&epmutex);  
+        did_lock_epmutex = 1;  
+    }  
+    if (op == EPOLL_CTL_ADD) {  
+        if (is_file_epoll(tfile)) {  
+            error = -ELOOP;  
+            // 目标文件也是epoll 检测是否有循环包含的问题  
+            if (ep_loop_check(ep, tfile) != 0) {  
+                goto error_tgt_fput;  
+            }  
+        } else  
+        {  
+            // 将目标文件添加到 epoll 全局的tfile_check_list 中  
+            list_add(&tfile->f_tfile_llink, &tfile_check_list);  
+        }  
+    }  
+
+    mutex_lock_nested(&ep->mtx, 0);  
+
+    // 以tfile 和fd 为key 在rbtree 中查找文件对应的epitem  
+    epi = ep_find(ep, tfile, fd);  
+
+    error = -EINVAL;  
+    switch (op) {  
+    case EPOLL_CTL_ADD:  
+        if (!epi) {  
+            // 没找到, 添加额外添加ERR HUP 事件  
+            epds.events |= POLLERR | POLLHUP;  
+            error = ep_insert(ep, &epds, tfile, fd);  
+        } else {  
+            error = -EEXIST;  
+        }  
+        // 清空文件检查列表  
+        clear_tfile_check_list();  
+        break;  
+    case EPOLL_CTL_DEL:  
+        if (epi) {  
+            error = ep_remove(ep, epi);  
+        } else {  
+            error = -ENOENT;  
+        }  
+        break;  
+    case EPOLL_CTL_MOD:  
+        if (epi) {  
+            epds.events |= POLLERR | POLLHUP;  
+            error = ep_modify(ep, epi, &epds);  
+        } else {  
+            error = -ENOENT;  
+        }  
+        break;  
+    }  
+    mutex_unlock(&ep->mtx);  
+
+error_tgt_fput:  
+    if (did_lock_epmutex) {  
+        mutex_unlock(&epmutex);  
+    }  
+
+    fput(tfile);  
+error_fput:  
+    fput(file);  
+error_return:  
+
+    return error;  
+}  
