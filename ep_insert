@@ -1,0 +1,122 @@
+//ep_insert()在epoll_ctl()中被调用, 完成往epollfd里面添加一个监听fd的工作
+static int ep_insert(struct eventpoll *ep, struct epoll_event *event,  
+                     struct file *tfile, int fd)  
+{  
+    int error, revents, pwake = 0;  
+    unsigned long flags;  
+    long user_watches;  
+    struct epitem *epi;  
+    struct ep_pqueue epq;  
+    /* 
+    struct ep_pqueue { 
+        poll_table pt; 
+        struct epitem *epi; 
+    }; 
+    */  
+
+    // 增加监视文件数  
+    user_watches = atomic_long_read(&ep->user->epoll_watches);  
+    if (unlikely(user_watches >= max_user_watches)) {  
+        return -ENOSPC;  
+    }  
+
+    // 分配初始化 epi  
+    if (!(epi = kmem_cache_alloc(epi_cache, GFP_KERNEL))) {  
+        return -ENOMEM;  
+    }  
+
+    INIT_LIST_HEAD(&epi->rdllink);  
+    INIT_LIST_HEAD(&epi->fllink);  
+    INIT_LIST_HEAD(&epi->pwqlist);  
+    epi->ep = ep;  
+    // 初始化红黑树中的key  
+    ep_set_ffd(&epi->ffd, tfile, fd);  
+    // 直接复制用户结构  
+    epi->event = *event;  
+    epi->nwait = 0;  
+    epi->next = EP_UNACTIVE_PTR;  
+
+    // 初始化临时的 epq  
+    epq.epi = epi;  
+    init_poll_funcptr(&epq.pt, ep_ptable_queue_proc);  
+    // 设置事件掩码  
+    epq.pt._key = event->events;  
+    //  内部会调用ep_ptable_queue_proc, 在文件对应的wait queue head 上  
+    // 注册回调函数, 并返回当前文件的状态  
+    revents = tfile->f_op->poll(tfile, &epq.pt);  
+
+    // 检查错误  
+    error = -ENOMEM;  
+    if (epi->nwait < 0) { // f_op->poll 过程出错  
+        goto error_unregister;  
+    }  
+    // 添加当前的epitem 到文件的f_ep_links 链表  
+    spin_lock(&tfile->f_lock);  
+    list_add_tail(&epi->fllink, &tfile->f_ep_links);  
+    spin_unlock(&tfile->f_lock);  
+
+    // 插入epi 到rbtree  
+    ep_rbtree_insert(ep, epi);  
+
+    /* now check if we've created too many backpaths */  
+    error = -EINVAL;  
+    if (reverse_path_check()) {  
+        goto error_remove_epi;  
+    }  
+
+    spin_lock_irqsave(&ep->lock, flags);  
+
+    /* 文件已经就绪插入到就绪链表rdllist */  
+    if ((revents & event->events) && !ep_is_linked(&epi->rdllink)) {  
+        list_add_tail(&epi->rdllink, &ep->rdllist);  
+
+
+        if (waitqueue_active(&ep->wq))  
+            // 通知sys_epoll_wait , 调用回调函数唤醒sys_epoll_wait 进程  
+        {  
+            wake_up_locked(&ep->wq);  
+        }  
+        // 先不通知调用eventpoll_poll 的进程  
+        if (waitqueue_active(&ep->poll_wait)) {  
+            pwake++;  
+        }  
+    }  
+
+    spin_unlock_irqrestore(&ep->lock, flags);  
+
+    atomic_long_inc(&ep->user->epoll_watches);  
+
+    if (pwake)  
+        // 安全通知调用eventpoll_poll 的进程  
+    {  
+        ep_poll_safewake(&ep->poll_wait);  
+    }  
+
+    return 0;  
+
+    error_remove_epi:  
+    spin_lock(&tfile->f_lock);  
+    // 删除文件上的 epi  
+    if (ep_is_linked(&epi->fllink)) {  
+        list_del_init(&epi->fllink);  
+    }  
+    spin_unlock(&tfile->f_lock);  
+
+    // 从红黑树中删除  
+    rb_erase(&epi->rbn, &ep->rbr);  
+
+    error_unregister:  
+    // 从文件的wait_queue 中删除, 释放epitem 关联的所有eppoll_entry  
+    ep_unregister_pollwait(ep, epi);  
+
+    spin_lock_irqsave(&ep->lock, flags);  
+    if (ep_is_linked(&epi->rdllink)) {  
+        list_del_init(&epi->rdllink);  
+    }  
+    spin_unlock_irqrestore(&ep->lock, flags);  
+
+    // 释放epi  
+    kmem_cache_free(epi_cache, epi);  
+
+    return error;  
+}
