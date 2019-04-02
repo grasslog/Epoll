@@ -1,0 +1,10 @@
+// 与一个文件上的wait_queue_head相关联，因为同一个文件可能有多个等待的事件，
+// 这些事件可能使用不同的等待队列
+// 钩子函数
+struct eppoll_entry {
+    // list struct epitem.pwqlist
+    struct list_head llink;
+    struct epitem *base; // 所有者
+    wait_queue_t wait; // 添加到wait_queue中的节点
+    wait_queue_head_t *whead; // 文件wait_queue头
+};
